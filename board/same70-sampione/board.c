@@ -18,9 +18,7 @@ static void at91_init_system(void)
     uint32_t read_MOR;
 
 	/* Set FWS according to SYS_BOARD_MCKR configuration */
-//	writel(EEFC_FMR_FWS(7), REG_EFC_FMR);
 	eefc_set_flash_wait_states(EEFC, CONFIG_FLASH_WAIT_STATES);
-
 
 	/* Before switching MAIN OSC on external crystal : enable it and don't
 	 * disable at the same time RC OSC in case of if MAIN OSC is still using RC
@@ -169,9 +167,9 @@ static void at91_init_sdram(void)
 
 	/* SDRAM device configuration */
 	/* Set the features of SDRAM device into the Configuration Register */
-	writel(	SDRAMC_CR_NC_COL10      | /* 8 column bits. */
-		SDRAMC_CR_NR_ROW13     | /* 11 row bits    (2K). */
-		SDRAMC_CR_NB_BANK4     | /* SDRAM 2 bank. */
+	writel(	SDRAMC_CR_NC_COL10     | /* 10 column bits. */
+		SDRAMC_CR_NR_ROW13     | /* 13 row bits (8K). */
+		SDRAMC_CR_NB_BANK4     | /* SDRAM 4 bank. */
 		SDRAMC_CR_CAS_LATENCY3 | /* CAS Latency 3. */
 		SDRAMC_CR_DBW          				| /* Data bus width 16 bits. */
 		SDRAMC_CR_TWR(NS2CY(30, CONFIG_MCK_HZ))       	| /* Write Recovery Delay. */
