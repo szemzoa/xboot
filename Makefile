@@ -48,4 +48,4 @@ debug: xboot.elf xboot.bin
 	$(GDB) xboot.elf -ex "target remote :3333" -ex "monitor reset halt"
 
 program:
-	$(OPENOCD) -f ./openocd/openocd.conf
+	$(OPENOCD) -f ./openocd.conf
