@@ -110,7 +110,7 @@ int main()
 		int ret;
 		if ((ret = qspiflash_deconfigure(&qspiflash, QSPI0)) < 0) {
 	    	    kprintf("qspi: error release flash: %d\r\n", ret);
-//		    goto _xboot_error;	    
+		    goto _xboot_error;	    
 		}
 	}
 
