@@ -19,6 +19,8 @@
 #define ALIGN(size, align)	(((size) + (align) - 1) & (~((align) - 1)))
 #define OF_ALIGN(size)		ALIGN(size, 4)
 
+#define IS_POWER_OF_TWO(n) ((n) && !((n) & ((n) - 1)))
+
 /**
  *  Returns the minimum value between two integers.
  *  \param a First integer to compare
@@ -40,5 +42,17 @@ static inline unsigned int swap_uint32(unsigned int data)
 
 	return a | b | c | d;
 }
+/*
+int fls(int value)
+{
+	int i;
+
+	for (i = 31; i >= 0; i--)
+		if (value & (1 << i))
+			return i + 1;
+
+	return 0;
+}
+*/
 
 #endif

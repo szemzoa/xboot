@@ -293,6 +293,7 @@ static void at91_init_mpu(void)
     uint32_t dw_region_attr;
 
 	ARM_DSB();
+
 /**
  *	QSPI memory region --- Strongly ordered
  *	START_Addr:-  0x80000000UL
@@ -317,9 +318,95 @@ static void at91_init_mpu(void)
 	ARM_ISB();
 }
 
+void at91_init_mpu_XIP(void)
+{
+    uint32_t dw_region_base_addr;
+    uint32_t dw_region_attr;
+
+	ARM_DSB();
+
+/**
+ *	SDRAM cacheable memory region --- Normal
+ */
+	dw_region_base_addr = 
+		SDRAM_START_ADDRESS | 
+		MPU_REGION_VALID | 
+		MPU_SDRAM_REGION;
+
+	dw_region_attr = MPU_AP_FULL_ACCESS | 
+		CACHEABLE_REGION |
+		mpu_cal_mpu_region_size(SDRAM_END_ADDRESS - SDRAM_START_ADDRESS) |
+		MPU_REGION_ENABLE;
+
+	mpu_set_region( dw_region_base_addr, dw_region_attr);
+
+/**
+ *	DMA not cacheable memory region
+ */
+	dw_region_base_addr = 
+		DMA_START_ADDRESS | 
+		MPU_REGION_VALID | 
+		MPU_DMA_REGION;
+
+	dw_region_attr = MPU_AP_FULL_ACCESS | 
+		STRONGLY_ORDERED |
+		mpu_cal_mpu_region_size(DMA_END_ADDRESS - DMA_START_ADDRESS) |
+		MPU_REGION_ENABLE;
+
+	mpu_set_region( dw_region_base_addr, dw_region_attr);
+
+/**
+ *	QSPI memory region --- Strongly ordered
+ *	START_Addr:-  0x80000000UL
+ *	END_Addr:-    0x8FFFFFFFUL
+ */
+	dw_region_base_addr = 
+		QSPI_START_ADDRESS | 
+		MPU_REGION_VALID | 
+		MPU_QSPI_REGION;
+
+	dw_region_attr = MPU_AP_FULL_ACCESS | 
+		CACHEABLE_REGION |
+		mpu_cal_mpu_region_size(QSPI_END_ADDRESS - QSPI_START_ADDRESS) |
+		MPU_REGION_ENABLE;
+
+	mpu_set_region( dw_region_base_addr, dw_region_attr);
+
+	/* Enable the MPU with default regions */
+	mpu_enable( MPU_ENABLE | MPU_PRIVDEFENA);
+
+	ARM_DSB();
+	ARM_ISB();
+}
+
+void at91_disable_mpu(void)
+{
+    uint32_t dw_region_base_addr;
+    uint32_t dw_region_attr;
+    uint8_t region, mpu_regions;
+
+	ARM_DSB();
+
+	mpu_regions = (readl(MPU_BASE + TYPE) >> 8) & 0xFF;
+
+	for(region = 0; region < mpu_regions; region++) {
+
+	    dw_region_base_addr = region;
+	    dw_region_attr = 0x0;
+
+	    mpu_set_region( dw_region_base_addr, dw_region_attr);
+	}
+
+	/* Disable the MPU */
+	mpu_enable(0x0);
+
+	ARM_DSB();
+	ARM_ISB();
+}
+
 unsigned int board_bootsel_pin_state()
 {
-	/* Configure RECOVERY pins */
+	/* Configure BOOT pin */
 	const struct pio_desc bootsel_pins[] = {
 	    {"BOOT", AT91C_PIN_PA(2), 0, PIO_DEFAULT, PIO_INPUT},
 	    {(char *)0, 0, 0, PIO_DEFAULT, PIO_PERIPH_A},
@@ -350,7 +437,7 @@ void board_init()
 	at91_init_sdram();
 
 	/* initialize MPU */
-	at91_init_mpu();
+//	at91_init_mpu();
 
 	/* initialize QSPI */
 	at91_init_qspi();

@@ -98,3 +98,17 @@ unsigned int mod(unsigned int dividend, unsigned int divisor)
 
 	return remainder;
 }
+
+unsigned power(unsigned base, unsigned degree)
+{
+    unsigned result = 1;
+    unsigned term = base;
+    while (degree)
+    {
+        if (degree & 1)
+            result *= term;
+        term *= term;
+        degree = degree >> 1;
+    }
+    return result;
+}

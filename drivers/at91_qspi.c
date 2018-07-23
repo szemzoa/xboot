@@ -24,119 +24,291 @@
  * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
  * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- * ----------------------------------------------------------------------------
  */
 
 /*----------------------------------------------------------------------------
- *        Headers
+ *        HEADERS
  *----------------------------------------------------------------------------*/
 
-#include <stdint.h>
-#include <string.h>
-#include "at91_qspi.h"
+#include <errno.h>
 #include "xboot.h"
+#include "at91_qspi.h"
+#include "spi-nor.h"
+
+/*----------------------------------------------------------------------------
+ *        CONSTANTS
+ *----------------------------------------------------------------------------*/
 
 //#define QSPI_VERBOSE_DEBUG
-//#define QSPI_VERBOSE_DEBUG2
 
 /*----------------------------------------------------------------------------
- *        Local functions
+ *        LOCAL FUNCTIONS
  *----------------------------------------------------------------------------*/
 
-static void *get_qspi_mem_from_addr(const Qspi* addr)
+static void * qspi_memcpy(union spi_flash_priv* priv, uint8_t *dst, const uint8_t *src, int count, bool use_dma)
 {
-	return (void*)QSPIMEM_ADDR;
+	return memcpy(dst, src, count);
 }
 
-static void qspi_memcpy(uint8_t *dst, const uint8_t *src, int count, bool use_dma)
+static int qspi_set_freq(union spi_flash_priv* priv, uint32_t clock)
 {
-	while (count--) {
-		*dst++ = *src++;
-		ARM_DSB();
+	Qspi* qspi = priv->qspi.addr;
+	uint32_t scbr;
+	uint32_t reg;
+
+	if (clock == 0) {
+		scbr = 0;
+	} else {
+		uint32_t mck = CONFIG_MCK_HZ;
+		scbr = (mck + clock - 1) / (clock);
+		if (scbr >= 1)
+			scbr--;
 	}
+
+	reg = qspi->QSPI_SCR;
+	reg = (reg & ~QSPI_SCR_SCBR_Msk) | QSPI_SCR_SCBR(scbr);
+	qspi->QSPI_SCR = reg;
+
+	return 0;
 }
 
-/*----------------------------------------------------------------------------
- *        Public functions
- *----------------------------------------------------------------------------*/
-
-void qspi_initialize(Qspi *qspi)
+static int qspi_set_mode(union spi_flash_priv* priv, uint8_t mode)
 {
+	Qspi* qspi = priv->qspi.addr;
+	uint32_t reg, val, msk;
+
+	reg = qspi->QSPI_SCR;
+
+	msk = (QSPI_SCR_CPHA | QSPI_SCR_CPOL);
+	switch (mode) {
+	case SPID_MODE_0:
+		val = 0;
+		break;
+
+	case SPID_MODE_1:
+		val = QSPI_SCR_CPHA;
+		break;
+
+	case SPID_MODE_2:
+		val = QSPI_SCR_CPOL;
+		break;
+
+	case SPID_MODE_3:
+		val = (QSPI_SCR_CPOL | QSPI_SCR_CPHA);
+		break;
+
+	default:
+		return -1;
+	}
+
+	if ((reg & msk) != val) {
+		reg = (reg & ~msk) | val;
+		qspi->QSPI_SCR = reg;
+	}
+
+	return 0;
+}
+
+static int qspi_init(union spi_flash_priv* priv)
+{
+	Qspi* qspi = priv->qspi.addr;
+
 	/* Disable write protection */
 	qspi->QSPI_WPMR = QSPI_WPMR_WPKEY_PASSWD;
 
-	/* Reset */
+	qspi->QSPI_CR = QSPI_CR_QSPIDIS;
 	qspi->QSPI_CR = QSPI_CR_SWRST;
 
-	/* Configure */
 	qspi->QSPI_MR = QSPI_MR_SMM_MEMORY;
 	qspi->QSPI_SCR = 0;
 
-	/* Enable */
 	qspi->QSPI_CR = QSPI_CR_QSPIEN;
+
+	return 0;
 }
 
-uint32_t qspi_set_baudrate(Qspi *qspi, uint32_t baudrate)
+static int qspi_cleanup(union spi_flash_priv* priv)
 {
-	uint32_t mck, scr, scbr;
+	Qspi* qspi = priv->qspi.addr;
 
-	if (!baudrate)
-		return 0;
+	qspi->QSPI_CR = QSPI_CR_QSPIDIS;
+	qspi->QSPI_CR = QSPI_CR_SWRST;
 
-	/* Serial Clock Baudrate */
-	mck = CONFIG_MCK_HZ;
-	scbr = (mck + baudrate - 1) / baudrate;
-	if (scbr > 0)
-		scbr--;
-
-	/* Update the Serial Clock Register */
-	scr = qspi->QSPI_SCR;
-	scr &= ~QSPI_SCR_SCBR_Msk;
-	scr |= QSPI_SCR_SCBR(scbr);
-	qspi->QSPI_SCR = scr;
-
-	return mck / (scbr + 1);
+	return 0;
 }
 
-bool qspi_perform_command(Qspi *qspi, const struct _qspi_cmd *cmd)
+static int qspi_init_ifr(const struct spi_flash_command *cmd, uint32_t *ifr)
 {
+	*ifr = 0;
+
+#ifdef QSPI_IFR_TFRTYP_TRSFR_REGISTER
+	switch (cmd->flags & SFLASH_TYPE_MASK) {
+	case SFLASH_TYPE_READ_REG:
+		*ifr |= QSPI_IFR_APBTFRTYP_READ | QSPI_IFR_TFRTYP_TRSFR_REGISTER;
+		break;
+	case SFLASH_TYPE_READ:
+		*ifr |= QSPI_IFR_APBTFRTYP_READ | QSPI_IFR_TFRTYP_TRSFR_MEMORY;
+		break;
+	case SFLASH_TYPE_WRITE_REG:
+	case SFLASH_TYPE_ERASE:
+		*ifr |= QSPI_IFR_APBTFRTYP_WRITE | QSPI_IFR_TFRTYP_TRSFR_REGISTER;
+		break;
+	case SFLASH_TYPE_WRITE:
+		*ifr |= QSPI_IFR_APBTFRTYP_WRITE | QSPI_IFR_TFRTYP_TRSFR_MEMORY;
+		break;
+	default:
+		return -1;
+	}
+#else
+	switch (cmd->flags & SFLASH_TYPE_MASK) {
+	case SFLASH_TYPE_READ:
+		*ifr |= QSPI_IFR_TFRTYP_TRSFR_READ_MEMORY;
+		break;
+
+	case SFLASH_TYPE_WRITE:
+		*ifr |= QSPI_IFR_TFRTYP_TRSFR_WRITE_MEMORY;
+		break;
+
+	case SFLASH_TYPE_READ_REG:
+		*ifr |= QSPI_IFR_TFRTYP_TRSFR_READ;
+		break;
+
+	case SFLASH_TYPE_WRITE_REG:
+	case SFLASH_TYPE_ERASE:
+		*ifr |= QSPI_IFR_TFRTYP_TRSFR_WRITE;
+		break;
+
+	default:
+		return -1;
+	}
+#endif
+
+	switch (cmd->proto) {
+	case SFLASH_PROTO_1_1_1:
+		*ifr |= QSPI_IFR_WIDTH_SINGLE_BIT_SPI;
+#ifdef QSPI_VERBOSE_DEBUG
+		kprintf("SPI 1-1-1 ");
+#endif
+		break;
+
+	case SFLASH_PROTO_1_1_2:
+		*ifr |= QSPI_IFR_WIDTH_DUAL_OUTPUT;
+#ifdef QSPI_VERBOSE_DEBUG
+		kprintf("SPI 1-1-2 ");
+#endif
+		break;
+
+	case SFLASH_PROTO_1_2_2:
+		*ifr |= QSPI_IFR_WIDTH_DUAL_IO;
+#ifdef QSPI_VERBOSE_DEBUG
+		kprintf("SPI 1-2-2 ");
+#endif
+		break;
+
+	case SFLASH_PROTO_2_2_2:
+		*ifr |= QSPI_IFR_WIDTH_DUAL_CMD;
+#ifdef QSPI_VERBOSE_DEBUG
+		kprintf("SPI 2-2-2 ");
+#endif
+		break;
+
+	case SFLASH_PROTO_1_1_4:
+		*ifr |= QSPI_IFR_WIDTH_QUAD_OUTPUT;
+#ifdef QSPI_VERBOSE_DEBUG
+		kprintf("SPI 1-1-4 ");
+#endif
+		break;
+
+	case SFLASH_PROTO_1_4_4:
+		*ifr |= QSPI_IFR_WIDTH_QUAD_IO;
+#ifdef QSPI_VERBOSE_DEBUG
+		kprintf("SPI 1-4-4 ");
+#endif
+		break;
+
+	case SFLASH_PROTO_4_4_4:
+		*ifr |= QSPI_IFR_WIDTH_QUAD_CMD;
+#ifdef QSPI_VERBOSE_DEBUG
+		kprintf("SPI 4-4-4 ");
+#endif
+		break;
+
+	default:
+		return -1;
+	}
+
+	return 0;
+}
+
+static int qspi_exec(union spi_flash_priv* priv, const struct spi_flash_command *cmd)
+{
+	Qspi* qspi = priv->qspi.addr;
 	uint32_t iar, icr, ifr;
 	uint32_t offset;
 	uint8_t *ptr;
 	bool use_dma = false;
+	bool enable_data =
+		(((cmd->flags & SFLASH_TYPE_MASK) == SFLASH_TYPE_READ ) ||
+		 ((cmd->flags & SFLASH_TYPE_MASK) == SFLASH_TYPE_WRITE ) ||
+		 ((cmd->flags & SFLASH_TYPE_MASK) == SFLASH_TYPE_READ_REG ) ||
+		 (((cmd->flags & SFLASH_TYPE_MASK) == SFLASH_TYPE_WRITE_REG ) &&
+		  (cmd->data_len != 0))) ? true : false;
+#ifdef QSPI_RICR_RDINST
+	bool icr_write = false;
+#endif
 
 	iar = 0;
 	icr = 0;
-	ifr = (cmd->ifr_width & QSPI_IFR_WIDTH_Msk) | (cmd->ifr_type & QSPI_IFR_TFRTYP_Msk);
 
-	/* Compute address parameters */
-	switch (cmd->enable.address) {
+	/* Init ifr. */
+	if (qspi_init_ifr(cmd, &ifr))
+		return -1;
+
+	
+	/* Compute instruction parameters. */
+#ifdef QSPI_RICR_RDINST
+	if (!cmd->data_len
+	    || cmd->flags & SFLASH_TYPE_MASK == SFLASH_TYPE_WRITE_REG
+	    || cmd->flags & SFLASH_TYPE_MASK == SFLASH_TYPE_WRITE) {
+		icr_write = true;
+		icr |= QSPI_WICR_WRINST(cmd->instruction);
+	} else {
+		icr |= QSPI_RICR_RDINST(cmd->instruction);
+	}
+#else
+	icr |= QSPI_ICR_INST(cmd->inst);
+#endif
+	ifr |= QSPI_IFR_INSTEN;
+
+	/* Compute address parameters. */
+	switch (cmd->addr_len) {
 	case 4:
 		ifr |= QSPI_IFR_ADDRL_32_BIT;
-		/* fallback to the 24-bit address case */
+		/* fall through the 24bit (3 byte) address case */
 	case 3:
-		iar = (cmd->enable.data) ? 0 : QSPI_IAR_ADDR(cmd->address);
+		iar = cmd->data_len ? 0 : QSPI_IAR_ADDR(cmd->addr);
 		ifr |= QSPI_IFR_ADDREN;
-		offset = cmd->address;
+		offset = cmd->addr;
 		break;
 	case 0:
 		offset = 0;
 		break;
 	default:
-		return false;
+		return -1;
 	}
 
-	/* Compute instruction parameters */
-	if (cmd->enable.instruction) {
-		icr |= QSPI_ICR_INST(cmd->instruction);
-		ifr |= QSPI_IFR_INSTEN;
-	}
-
-	/* Compute option parameters */
-	if (cmd->enable.mode && cmd->num_mode_cycles) {
+	/* Compute option parameters. */
+	if (cmd->num_mode_cycles) {
 		uint32_t mode_cycle_bits, mode_bits;
 
+#ifdef QSPI_RICR_RDINST
+		if (icr_write)
+			icr |= QSPI_WICR_WROPT(cmd->mode);
+		else
+			icr |= QSPI_RICR_RDOPT(cmd->mode);
+#else
 		icr |= QSPI_ICR_OPT(cmd->mode);
+#endif
 		ifr |= QSPI_IFR_OPTEN;
 
 		switch (ifr & QSPI_IFR_WIDTH_Msk) {
@@ -154,7 +326,7 @@ bool qspi_perform_command(Qspi *qspi, const struct _qspi_cmd *cmd)
 			mode_cycle_bits = 4;
 			break;
 		default:
-			return false;
+			return -1;
 		}
 
 		mode_bits = cmd->num_mode_cycles * mode_cycle_bits;
@@ -176,88 +348,57 @@ bool qspi_perform_command(Qspi *qspi, const struct _qspi_cmd *cmd)
 			break;
 
 		default:
-			return false;
+			return -1;
 		}
 	}
 
-	/* Set number of dummy cycles */
-	if (cmd->enable.dummy)
-		ifr |= QSPI_IFR_NBDUM(cmd->num_dummy_cycles);
-	else
-		ifr |= QSPI_IFR_NBDUM(0);
+	/* Set the number of dummy cycles. */
+	if (cmd->num_wait_states)
+		ifr |= QSPI_IFR_NBDUM(cmd->num_wait_states);
 
-	/* Set data enable */
-	if (cmd->enable.data) {
+	/* Set data enable. */
+	if (enable_data) {
 		ifr |= QSPI_IFR_DATAEN;
 
-		/* Special case for Continous Read Mode */
-		if (!cmd->tx_buffer && !cmd->rx_buffer)
-			ifr |= QSPI_IFR_CRM_ENABLED;
+		/* Special case for Continuous Read Mode. */
+		if (!cmd->tx_data && !cmd->rx_data)
+			ifr |= QSPI_IFR_CRM;
 	}
+
+	/* Clear pending interrupts. */
+	(void)qspi->QSPI_SR;
 
 #ifdef QSPI_VERBOSE_DEBUG
 	{
-		uint32_t i, len;
+		int len;
 
-		switch (cmd->ifr_width & QSPI_IFR_WIDTH_Msk) {
-		case QSPI_IFR_WIDTH_SINGLE_BIT_SPI:
-			kprintf("SPI 1-1-1 ");
-			break;
+		if (cmd->inst)
+			kprintf("opcode=%02Xh ", cmd->inst);
 
-		case QSPI_IFR_WIDTH_DUAL_OUTPUT:
-			kprintf("SPI 1-1-2 ");
-			break;
+		if (cmd->addr_len)
+			kprintf("address=0x%08X (%d-bytes) ", (unsigned int)cmd->addr, cmd->addr_len);
 
-		case QSPI_IFR_WIDTH_QUAD_OUTPUT:
-			kprintf("SPI 1-1-4 ");
-			break;
+		if (cmd->num_mode_cycles)
+			kprintf("mode=%u (%02Xh) ", cmd->num_mode_cycles, cmd->mode);
 
-		case QSPI_IFR_WIDTH_DUAL_IO:
-			kprintf("SPI 1-2-2 ");
-			break;
+		if (cmd->num_wait_states)
+			kprintf("dummy=%u ", cmd->num_wait_states);
 
-		case QSPI_IFR_WIDTH_QUAD_IO:
-			kprintf("SPI 1-4-4 ");
-			break;
-
-		case QSPI_IFR_WIDTH_DUAL_CMD:
-			kprintf("SPI 2-2-2 ");
-			break;
-
-		case QSPI_IFR_WIDTH_QUAD_CMD:
-			kprintf("SPI 4-4-4 ");
-			break;
-		}
-
-		if (cmd->enable.instruction)
-			kprintf("opcode=%02Xh ", cmd->instruction);
-
-		if (cmd->enable.address == 4)
-			kprintf("address=0x%08X (4-bytes) ", (unsigned int)cmd->address);
-		else if (cmd->enable.address == 3)
-			kprintf("address=0x%06X (3-bytes) ", (unsigned int)cmd->address);
-
-		if (cmd->enable.mode && cmd->num_mode_cycles)
-			kprintf("mode=%u (%02Xh)",
-				    cmd->num_mode_cycles, cmd->mode);
-
-		if (cmd->enable.dummy)
-			kprintf("dummy=%u ", cmd->num_dummy_cycles);
-
-		len = cmd->buffer_len;
+		len = cmd->data_len;
 		if (len > 4)
 			len = 4;
 		if (len) {
-			if (cmd->rx_buffer)
+			if (cmd->rx_data)
 				goto next;
 
-			if (cmd->tx_buffer) {
-				kprintf("TX (%u bytes): ", (unsigned int)cmd->buffer_len);
+			if (cmd->tx_data) {
+				int i;
+				kprintf("TX (%u bytes): ", (unsigned int)cmd->data_len);
 				for (i = 0; i < len; i++)
-					kprintf("0x%02X ", ((uint8_t *)cmd->tx_buffer)[i]);
+					kprintf("0x%02X ", ((uint8_t *)cmd->tx_data)[i]);
 			}
 
-			if (len != cmd->buffer_len)
+			if (len != cmd->data_len)
 				kprintf("... ");
 		}
 
@@ -266,70 +407,72 @@ bool qspi_perform_command(Qspi *qspi, const struct _qspi_cmd *cmd)
 next:
 #endif /* QSPI_VERBOSE_DEBUG */
 
-	/* Set QSPI Instruction Frame registers */
+
+	/* Set QSPI Instruction Frame registers. */
 	qspi->QSPI_IAR = iar;
+#ifdef QSPI_RICR_RDINST
+	if (icr_write)
+		qspi->QSPI_WICR = icr;
+	else
+		qspi->QSPI_RICR = icr;
+#else
 	qspi->QSPI_ICR = icr;
-
-	ARM_DMB();
-
+#endif
+	
 	qspi->QSPI_IFR = ifr;
 
-	/* Skip to the final steps if there is no data */
-	if (!cmd->enable.data)
+	/* Skip to the final steps if there is no data. */
+	if (!enable_data)
 		goto no_data;
 
-	/* Dummy read of QSPI_IFR to synchronize APB and AHB accesses */
+	/* Dummy read of QSPI_IFR to synchronize APB and AHB accesses. */
 	(void)qspi->QSPI_IFR;
 
-	/* Send/Receive data */
-	if (cmd->tx_buffer) {
+	/* Stop here for Continuous Read. */
+	if (cmd->tx_data) {
 		/* Write data */
-		ptr = (uint8_t*)get_qspi_mem_from_addr(qspi);
-
-		qspi_memcpy(ptr + offset, cmd->tx_buffer, cmd->buffer_len, use_dma);
-
-	} else if (cmd->rx_buffer) {
+		ptr = priv->qspi.mem;
+		qspi_memcpy(priv, ptr + offset, cmd->tx_data, cmd->data_len, use_dma);
+	} else if (cmd->rx_data) {
 		/* Read data */
-		ptr = (uint8_t*)get_qspi_mem_from_addr(qspi);
-
-		qspi_memcpy(cmd->rx_buffer, ptr + offset, cmd->buffer_len, use_dma);
-
+		ptr = priv->qspi.mem;
+		qspi_memcpy(priv, cmd->rx_data, ptr + offset, cmd->data_len, use_dma);
 	} else {
 		/* Stop here for continuous read */
-		return true;
+		return 0;
 	}
 
-no_data:
-	/* Release the chip-select */
+	/* Release the chip-select. */
 	qspi->QSPI_CR = QSPI_CR_LASTXFER;
 
-	/* Wait for INSTRuction End */
-	uint32_t timeout = cmd->timeout;
+no_data:
+	{
+		/* Wait for INSTRuction End */
+		uint32_t timeout = cmd->timeout;
+		while (!(qspi->QSPI_SR & QSPI_SR_INSTRE)) {
 
-	while (!(qspi->QSPI_SR & QSPI_SR_INSTRE) && timeout > 0) {
+			if ( timeout-- == 0 ) {
+				kprintf("qspi_exec timeout reached\r\n");
+				return -1;
+			}
 
-		if ( timeout == 0 ) {
-			kprintf("qspi_perform_command timeout reached\r\n");
-			return false;
+			delay_ms(1);
 		}
-
-		timeout--;
-		delay_ms(1);
 	}
 
-#ifdef QSPI_VERBOSE_DEBUG2
+#ifdef QSPI_VERBOSE_DEBUG
 	{
 		uint32_t i, len;
 
-		len = cmd->buffer_len;
+		len = cmd->data_len;
 		if (len > 4)
 			len = 4;
-		if (len && cmd->rx_buffer) {
-			kprintf("RX (%u bytes): ", (unsigned int)cmd->buffer_len);
+		if (len && cmd->rx_data) {
+			kprintf("RX (%u bytes): ", (unsigned int)cmd->data_len);
 			for (i = 0; i < len; i++)
-				kprintf("0x%02X ", ((uint8_t *)cmd->rx_buffer)[i]);
+				kprintf("0x%02X ", ((uint8_t *)cmd->rx_data)[i]);
 
-			if (len != cmd->buffer_len)
+			if (len != cmd->data_len)
 				kprintf("... ");
 
 			kprintf("\r\n");
@@ -337,5 +480,41 @@ no_data:
 	}
 #endif /* QSPI_VERBOSE_DEBUG */
 
-	return true;
+	return 0;
+}
+
+static const struct spi_ops qspi_ops = {
+	.init		= qspi_init,
+	.cleanup	= qspi_cleanup,
+	.set_freq	= qspi_set_freq,
+	.set_mode	= qspi_set_mode,
+	.exec		= qspi_exec,
+};
+
+/*----------------------------------------------------------------------------
+ *        EXPORTED FUNCTIONS
+ *----------------------------------------------------------------------------*/
+
+void qspi_configure(struct spi_flash *flash)
+{
+	flash->priv.qspi.addr = QSPI0;
+	flash->priv.qspi.mem = QSPIMEM_ADDR;
+
+	flash->hwcaps.mask = (SFLASH_HWCAPS_READ_MASK | SFLASH_HWCAPS_PP_MASK);
+
+	flash->ops = &qspi_ops;
+}
+
+int qspi_xip(struct spi_flash *flash, void **mem)
+{
+	int ret;
+
+	if (flash->enable_0_4_4) {
+		ret = flash->enable_0_4_4(flash, true);
+		if (ret)
+			return ret;
+	}
+
+	*mem = flash->priv.qspi.mem;
+	return spi_flash_read(flash, 0, NULL, 0);
 }

@@ -4,10 +4,17 @@
 #include "sdcard.h"
 #include "fdt.h"
 #include "at91_qspi.h"
-#include "qspiflash.h"
+#include "spi-flash.h"
+#include "spi-nor.h"
 
 struct image_info image;
-static struct _qspiflash qspiflash;
+static struct spi_flash flash;
+
+static struct spi_flash_cfg flash_cfg = {
+    .type = SPI_FLASH_TYPE_QSPI,
+    .baudrate = CONFIG_QSPIFLASH_BAUDRATE,
+    .mode = SPI_FLASH_MODE3,
+};
 
 static void start_kernel(unsigned int kaddr, unsigned int daddr)
 {
@@ -47,6 +54,7 @@ static int load_uimage()
 	return 0;
 }
 
+
 int main()
 {    
     unsigned int kernel_entry, dtb_address;	
@@ -67,20 +75,41 @@ int main()
 
 		if (load_uimage() != 0 )
 		    goto _xboot_error;	
+
+		if ( boot_image_setup((unsigned char *)CONFIG_KERNEL_LOAD_ADDRESS, &kernel_entry) != 0 )
+		    goto _xboot_error;	
+
+		dtb_address = CONFIG_DTB_LOAD_ADDRESS;
+
+		at91_disable_mpu();
 	    
 	} else {
-		kprintf("QSPI boot selected\r\n");
 
-		qspi_initialize(QSPI0);
-		qspi_set_baudrate(QSPI0, CONFIG_QSPIFLASH_BAUDRATE);
+#ifdef CONFIG_BOOT_XIP
 
-		if (qspiflash_configure(&qspiflash, QSPI0) < 0) {
-	    	    kprintf("qspi: not configured\r\n");
-		    goto _xboot_error;	    
+		kprintf("XIP boot selected\r\n");
+
+	        if ( spi_nor_configure(&flash, &flash_cfg) != 0 ) {
+		    kprintf("spi_nor configure failed\r\n");
+		    goto _xboot_error;	
 		}
 
+		if ( qspi_xip(&flash, (void*)QSPIMEM_ADDR) < 0 ) {
+		    kprintf("enter XIP mode: failed\r\n");
+		    goto _xboot_error;	
+		} 
+
+		at91_init_mpu_XIP();
+
+		kernel_entry = CONFIG_KERNEL_XIP_ADDRESS | 1;
+		dtb_address = CONFIG_DTB_XIP_ADDRESS;
+#else
+		kprintf("QSPI boot selected\r\n");
+
+		spi_nor_configure(&flash, &flash_cfg);
+		
 		/* load dtb header */
-		qspiflash_read(&qspiflash, CONFIG_DTB_QSPI_ADDRESS, 
+		spi_nor_read(&flash, CONFIG_DTB_QSPI_ADDRESS, 
 		    (void *)CONFIG_DTB_LOAD_ADDRESS, sizeof(struct boot_param_header));
 
 		dtb_size = of_get_dt_total_size((void *)CONFIG_DTB_LOAD_ADDRESS);
@@ -89,11 +118,11 @@ int main()
 		kprintf("QSPI: dt blob: Read from 0x%02X to 0x%X size: %d bytes\r\n", 
 		    CONFIG_DTB_QSPI_ADDRESS, CONFIG_DTB_LOAD_ADDRESS, dtb_size);
 		
-		qspiflash_read(&qspiflash, CONFIG_DTB_QSPI_ADDRESS, 
+		spi_nor_read(&flash, CONFIG_DTB_QSPI_ADDRESS, 
 		    (void *)CONFIG_DTB_LOAD_ADDRESS, dtb_size);
 
 		/* load uImage header */
-		qspiflash_read(&qspiflash, CONFIG_KERNEL_QSPI_ADDRESS, 
+		spi_nor_read(&flash, CONFIG_KERNEL_QSPI_ADDRESS, 
 		    (void *)CONFIG_KERNEL_LOAD_ADDRESS, sizeof(struct linux_uimage_header));
 
 		uimage_header = (struct linux_uimage_header *)CONFIG_KERNEL_LOAD_ADDRESS;
@@ -103,21 +132,15 @@ int main()
 		kprintf("QSPI: Image: Read from 0x%02X to 0x%X, size: %d bytes\r\n", 
 		    CONFIG_KERNEL_QSPI_ADDRESS, CONFIG_KERNEL_LOAD_ADDRESS, kernel_size);
 
-		qspiflash_read(&qspiflash, CONFIG_KERNEL_QSPI_ADDRESS, 
+		spi_nor_read(&flash, CONFIG_KERNEL_QSPI_ADDRESS, 
 		    (void *)CONFIG_KERNEL_LOAD_ADDRESS, kernel_size);
 
-		/* switch back to SPI-1-1-1 proto */
-		int ret;
-		if ((ret = qspiflash_deconfigure(&qspiflash, QSPI0)) < 0) {
-	    	    kprintf("qspi: error release flash: %d\r\n", ret);
-		    goto _xboot_error;	    
-		}
+		if ( boot_image_setup((unsigned char *)CONFIG_KERNEL_LOAD_ADDRESS, &kernel_entry) != 0 )
+		    goto _xboot_error;	
+
+		dtb_address = CONFIG_DTB_LOAD_ADDRESS;
+#endif
 	}
-
-	if ( boot_image_setup((unsigned char *)CONFIG_KERNEL_LOAD_ADDRESS, &kernel_entry) != 0 )
-	    goto _xboot_error;	
-
-	dtb_address = CONFIG_DTB_LOAD_ADDRESS;
 
 	kprintf("starting kernel 0x%04x\r\n\r\n", kernel_entry);
 

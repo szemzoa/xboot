@@ -4,21 +4,50 @@
 #include "common.h"
 #include "debug.h"
 
-#define SCS_BASE            	0xE000E000UL          		/* System Control Space Base Address  */
-#define SCB_BASE            	(SCS_BASE +  0x0D00UL)  	/* System Control Block Base Address  */
-#define VTOR                	0x08				/* Vector Table Offset Register */
-#define ICIALLU			0x250 				/* I-Cache Invalidate All to PoU */
-#define CCR			0x14 				/* Configuration Control Register */
-#define SHCSR                   0x24 				/* System Handler Control and State Register */
-#define CFSR			0x28				/* Configurable Fault Status Register */
-#define HFSR			0x2C				/* HardFault Status Register */
-#define DFSR			0x30				/* Debug Fault Status Register */
-#define MMFAR			0x34				/* MemManage Fault Address Register */
-#define BFAR			0x38				/* BusFault Address Register */
-#define AFSR			0x3C				/* Auxiliary Fault Status Register */
-#define CCSIDR                  0x80 				/* Cache Size ID Register */
-#define DCISW                   0x260 				/* D-Cache Invalidate by Set-way */
-#define DCCISW			0x274 				/* D-Cache Clean and Invalidate by Set-way */
+#define SCS_BASE        0xE000E000UL          		/* System Control Space Base Address  */
+#define SCB_BASE        (SCS_BASE +  0x0D00UL)  	/* System Control Block Base Address  */
+#define VTOR            0x08				/* Vector Table Offset Register */
+#define ICIALLU		0x250 				/* I-Cache Invalidate All to PoU */
+#define CCR		0x14 				/* Configuration Control Register */
+#define SHCSR           0x24 				/* System Handler Control and State Register */
+#define CFSR		0x28				/* Configurable Fault Status Register */
+#define HFSR		0x2C				/* HardFault Status Register */
+#define DFSR		0x30				/* Debug Fault Status Register */
+#define MMFAR		0x34				/* MemManage Fault Address Register */
+#define BFAR		0x38				/* BusFault Address Register */
+#define AFSR		0x3C				/* Auxiliary Fault Status Register */
+#define CCSIDR          0x80 				/* Cache Size ID Register */
+#define DCISW           0x260 				/* D-Cache Invalidate by Set-way */
+#define DCCISW		0x274 				/* D-Cache Clean and Invalidate by Set-way */
+#define ITCMCR		0x290 				/* Instruction Tightly-Coupled Memory Control Register */
+#define DTCMCR		0x294 				/* Data Tightly-Coupled Memory Control Registers */
+
+/* Instruction Tightly-Coupled Memory Control Register*/
+#define SCB_ITCMCR_SZ_Pos                   3                                             /*!< SCB ITCMCR: SZ Position */
+#define SCB_ITCMCR_SZ_Msk                  (0xFUL << SCB_ITCMCR_SZ_Pos)                   /*!< SCB ITCMCR: SZ Mask */
+
+#define SCB_ITCMCR_RETEN_Pos                2                                             /*!< SCB ITCMCR: RETEN Position */
+#define SCB_ITCMCR_RETEN_Msk               (0x1UL << SCB_ITCMCR_RETEN_Pos)                /*!< SCB ITCMCR: RETEN Mask */
+
+#define SCB_ITCMCR_RMW_Pos                  1                                             /*!< SCB ITCMCR: RMW Position */
+#define SCB_ITCMCR_RMW_Msk                 (0x1UL << SCB_ITCMCR_RMW_Pos)                  /*!< SCB ITCMCR: RMW Mask */
+
+#define SCB_ITCMCR_EN_Pos                   0                                             /*!< SCB ITCMCR: EN Position */
+#define SCB_ITCMCR_EN_Msk                  (0x1UL << SCB_ITCMCR_EN_Pos)                   /*!< SCB ITCMCR: EN Mask */
+
+/* Data Tightly-Coupled Memory Control Registers */
+#define SCB_DTCMCR_SZ_Pos                   3                                             /*!< SCB DTCMCR: SZ Position */
+#define SCB_DTCMCR_SZ_Msk                  (0xFUL << SCB_DTCMCR_SZ_Pos)                   /*!< SCB DTCMCR: SZ Mask */
+
+#define SCB_DTCMCR_RETEN_Pos                2                                             /*!< SCB DTCMCR: RETEN Position */
+#define SCB_DTCMCR_RETEN_Msk               (1UL << SCB_DTCMCR_RETEN_Pos)                   /*!< SCB DTCMCR: RETEN Mask */
+
+#define SCB_DTCMCR_RMW_Pos                  1                                             /*!< SCB DTCMCR: RMW Position */
+#define SCB_DTCMCR_RMW_Msk                 (1UL << SCB_DTCMCR_RMW_Pos)                    /*!< SCB DTCMCR: RMW Mask */
+
+#define SCB_DTCMCR_EN_Pos                   0                                             /*!< SCB DTCMCR: EN Position */
+#define SCB_DTCMCR_EN_Msk                  (1UL << SCB_DTCMCR_EN_Pos)                     /*!< SCB DTCMCR: EN Mask */
+
 
 #define SCB_CCR_IC_Pos		17				/* Instruction cache enable bit Position */
 #define SCB_CCR_IC_Msk		(1UL << SCB_CCR_IC_Pos)		/* Instruction cache enable bit Mask */

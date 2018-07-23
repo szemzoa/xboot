@@ -1,5 +1,5 @@
 /* ----------------------------------------------------------------------------
- *         SAM Software Package License
+ *         ATMEL Microcontroller Software Support
  * ----------------------------------------------------------------------------
  * Copyright (c) 2015, Atmel Corporation
  *
@@ -24,115 +24,30 @@
  * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
  * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- * ----------------------------------------------------------------------------
  */
 
+#ifndef	QSPI_H_
+#define	QSPI_H_
 
-/**
- * \file
- *
- * Interface for Quad Serial Peripheral Interface (QSPI) controller.
- *
- */
-
-#ifndef _AT91_QSPI_H_
-#define _AT91_QSPI_H_
-
-#include <stdbool.h>
 #include "component_qspi.h"
 
-/*----------------------------------------------------------------------------
- *        Types
- *----------------------------------------------------------------------------*/
+struct spi_flash;
 
-/** QSPI Command structure */
-struct _qspi_cmd {
-	/** Data Transfer Type (QSPI_IFR_TFRTYP_TRSFR_xxx) */
-	uint32_t ifr_type;
-
-	/** Width of Instruction Code, Address, Option Code and Data
-	 * (QSPI_IFR_WIDTH_xxx) */
-	uint32_t ifr_width;
-
-	/** Flags to select which information is included in the command */
-	struct {
-		/** 0: don't send instruction code, 1: send instuction code */
-		uint32_t instruction:1;
-		/** 0: don't send address, 3: send 3-byte address, 4: send
-		 * 4-byte address */
-		uint32_t address:3;
-		/** 0: don't send mode bits, 1: send mode bits */
-		uint32_t mode:1;
-		/** 0: don't send dummy bits, 1: send dummy bits */
-		uint32_t dummy:1;
-		/** 0: don't send/recieve data, 1: send/recieve data */
-		uint32_t data:1;
-		/** reserved, not used */
-		uint32_t reserved:25;
-	} enable;
-
-	/** Instruction code */
-	uint8_t instruction;
-
-	/** Mode bits */
-	uint8_t mode;
-	
-	/** Number of mode cycles */
-	uint8_t num_mode_cycles;
-
-	/** Number of dummy cycles */
-	uint8_t num_dummy_cycles;
-
-	/** QSPI address */
-	uint32_t address;
-
-	/** Address of the TX buffer */
-	const void *tx_buffer;
-
-	/** Address of the RX buffer */
-	void *rx_buffer;
-
-	/** Size of the RX/TX buffer */
-	uint32_t buffer_len;
-
-	/** Timeout for the command execution, in timer ticks */
-	uint32_t timeout;
+enum _spid_mode {
+	SPID_MODE_0 = 0x00, // POL=0, CPHA=0
+	SPID_MODE_1 = 0x01, // POL=0, CPHA=1
+	SPID_MODE_2 = 0x02, // POL=1, CPHA=0
+	SPID_MODE_3 = 0x03, // POL=1, CPHA=1
 };
 
-/*----------------------------------------------------------------------------
- *        Exported functions
- *----------------------------------------------------------------------------*/
+struct qspi_priv {
+	Qspi* addr;
+	void* mem;
+};
 
-/**
- * \brief Reset and initialize a QSPI instance.
- *
- * \param qspi the QSPI instance
- */
-void qspi_initialize(Qspi *qspi);
+#include "spi-flash.h"
 
-/**
- * \brief Configure the baudrate for a QSPI instance.
- *
- * \param qspi the QSPI instance
- * \param baudrate the requested baudrate
- * \return the actual baudrate configured (can be lower than requested)
- */
-uint32_t qspi_set_baudrate(Qspi *qspi, uint32_t baudrate);
+extern void qspi_configure(struct spi_flash *flash);
+extern int qspi_xip(struct spi_flash *flash, void **mem);
 
-/**
- * \brief Perform a QSPI command.
- *
- * Note that if enable.data is set in the command, data will be sent/recieved:
- * - if tx_buffer is not NULL, data will be sent
- * - if rx_buffer is not NULL, data will be recieved
- * - if both tx_buffer and rx_buffer are NULL, QSPI will be configured in
- * "Continuous Read" mode and random read access can be done at the address
- * returned by get_qspi_mem_from_addr
- *
- * \param qspi the QSPI instance
- * \param cmd the QSPI command to perform
- * \return true if the command was succesfully issued, false otherwise
- */
-bool qspi_perform_command(Qspi *qspi, const struct _qspi_cmd *cmd);
-
-#endif /* _QSPI_H_ */
+#endif /* QSPI_H_ */

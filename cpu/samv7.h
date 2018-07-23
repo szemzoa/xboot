@@ -35,4 +35,18 @@
 #define SDRAM_CS_ADDR 	0x70000000 	/* SDRAM Chip Select base address */
 #define QSPIMEM_ADDR	0x80000000	/* QSPI MEMORY MAPPED base address */
 
+#define MPU_SDRAM_REGION	13
+#define MPU_DMA_REGION		14
+#define MPU_QSPI_REGION		15
+
+#define SDRAM_START_ADDRESS                  0x70000000
+#define SDRAM_END_ADDRESS                    0x73dfffff
+
+#define DMA_START_ADDRESS                    0x73e00000
+#define DMA_END_ADDRESS                      0x73FFFFFF
+
+/******* QSPI macros ***************************/
+#define QSPI_START_ADDRESS                   0x80000000UL
+#define QSPI_END_ADDRESS                     0x9FFFFFFFUL
+
 #endif

@@ -29,7 +29,7 @@
 #define MPU_RASR_C_Pos			17                                             /*!< MPU RASR: ATTRS.C Position */
 #define MPU_RASR_B_Pos			16                                             /*!< MPU RASR: ATTRS.B Position */
 
-#define CACHEABLE_REGION	(( 0x01 << MPU_RASR_TEX_Pos ) | ( 0x01  << MPU_RASR_C_Pos ) | ( 0x01  << MPU_RASR_B_Pos ) | ( 0x00 << MPU_RASR_S_Pos ))
+#define CACHEABLE_REGION	((0x01 << MPU_RASR_TEX_Pos ) | ( 0x01  << MPU_RASR_C_Pos ) | ( 0x01  << MPU_RASR_B_Pos ) | ( 0x00 << MPU_RASR_S_Pos ))
 #define STRONGLY_ORDERED	((0x00 << MPU_RASR_TEX_Pos) | (DISABLE << MPU_RASR_C_Pos) | (DISABLE << MPU_RASR_B_Pos))     // DO not care //
 
 #define QSPI_START_ADDRESS                   0x80000000UL

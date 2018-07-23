@@ -72,7 +72,7 @@ void reset_handler(void)
 }
 
 /* Delay loop is put to SRAM so that FWS will not affect delay time */
-__attribute__ ((section(".ramfunc"))) __attribute__((optimize(s)))
+__attribute__ ((section(".ramfunc")))
 void portable_delay_cycles(unsigned long n)
 {
 	__asm (
@@ -109,7 +109,6 @@ void armv7m_icache_disable()
 	ARM_ISB();
 }
 
-#if 0
 void armv7m_icache_enable()
 {
     uint32_t ccr;
@@ -189,7 +188,6 @@ void armv7m_dcache_flush()
 	ARM_DSB();
 	ARM_ISB();
 }
-#endif
 
 void armv7m_dcache_disable()
 {
